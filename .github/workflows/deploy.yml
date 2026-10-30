@@ -2,18 +2,15 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: ['main'] # Viene eseguito ad ogni push sul ramo main
+    branches: ['main']
 
-  # Consente l'esecuzione manuale dalla scheda Actions su GitHub
   workflow_dispatch:
 
-# Imposta i permessi del GITHUB_TOKEN per consentire il deployment su GitHub Pages
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Permette un solo deployment simultaneo
 concurrency:
   group: 'pages'
   cancel-in-progress: true
@@ -32,10 +29,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build project
         run: npm run build
