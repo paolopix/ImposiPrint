@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { SheetSettings, PaperFormat, SheetOrientation } from '../types';
+import { SheetSettings, PaperFormat, SheetOrientation, PhotoPosition } from '../types';
 import { calculatePhotoGrid, downloadPdf, printPdf } from '../utils/pdfGenerator';
 import { downloadFile } from '../utils/imageUtils';
 import {
@@ -196,7 +196,7 @@ export const A5Preview: React.FC<Props> = ({
           <div className="absolute inset-0 pointer-events-none border border-slate-200/60" />
 
           {/* Render 4 Photos at calculated percentages of the page */}
-          {positions.map((pos) => {
+          {positions.map((pos: PhotoPosition) => {
             const leftPct = (pos.x / pageWidth) * 100;
             const topPct = (pos.y / pageHeight) * 100;
             const widthPct = (pos.width / pageWidth) * 100;

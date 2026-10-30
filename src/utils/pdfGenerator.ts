@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import { ComputedLayout, LayoutConfig } from '../types';
+import { ComputedLayout, LayoutConfig, PhotoPosition, SheetSettings } from '../types';
 import { computeCropMarkLines } from './cropMarksRenderer';
 
 // Pre-load an image to an HTMLImageElement
@@ -215,3 +215,111 @@ export async function exportLayoutToPdf(
   pdf.save(fileName);
   onProgress(100, 'Esportazione completata!');
 }
+
+export function calculatePhotoGrid(sheetSettings: SheetSettings): { positions: PhotoPosition[] } {
+  const isLandscape = sheetSettings.orientation === 'landscape';
+  const pageWidth = isLandscape ? sheetSettings.paperHeightMm : sheetSettings.paperWidthMm;
+  const pageHeight = isLandscape ? sheetSettings.paperWidthMm : sheetSettings.paperHeightMm;
+
+  const photoW = 35; // mm
+  const photoH = 45; // mm
+  const spacing = sheetSettings.spacingMm;
+  const positions: PhotoPosition[] = [];
+
+  if (sheetSettings.layout === 'row') {
+    const totalW = 4 * photoW + 3 * spacing;
+    const startX = (pageWidth - totalW) / 2;
+    const startY = (pageHeight - photoH) / 2;
+    for (let i = 0; i < 4; i++) {
+      positions.push({
+        index: i,
+        x: startX + i * (photoW + spacing),
+        y: startY,
+        width: photoW,
+        height: photoH,
+      });
+    }
+  } else if (sheetSettings.layout === 'column') {
+    const totalH = 4 * photoH + 3 * spacing;
+    const startX = (pageWidth - photoW) / 2;
+    const startY = (pageHeight - totalH) / 2;
+    for (let i = 0; i < 4; i++) {
+      positions.push({
+        index: i,
+        x: startX,
+        y: startY + i * (photoH + spacing),
+        width: photoW,
+        height: photoH,
+      });
+    }
+  } else {
+    // 2x2 grid
+    const totalW = 2 * photoW + spacing;
+    const totalH = 2 * photoH + spacing;
+    const startX = (pageWidth - totalW) / 2;
+    const startY = (pageHeight - totalH) / 2;
+
+    for (let row = 0; row < 2; row++) {
+      for (let col = 0; col < 2; col++) {
+        const index = row * 2 + col;
+        positions.push({
+          index,
+          x: startX + col * (photoW + spacing),
+          y: startY + row * (photoH + spacing),
+          width: photoW,
+          height: photoH,
+        });
+      }
+    }
+  }
+
+  return { positions };
+}
+
+export function downloadPdf(canvas: HTMLCanvasElement, sheetSettings: SheetSettings): void {
+  const isLandscape = sheetSettings.orientation === 'landscape';
+  const pageWidth = isLandscape ? sheetSettings.paperHeightMm : sheetSettings.paperWidthMm;
+  const pageHeight = isLandscape ? sheetSettings.paperWidthMm : sheetSettings.paperHeightMm;
+
+  const pdf = new jsPDF({
+    orientation: sheetSettings.orientation,
+    unit: 'mm',
+    format: [pageWidth, pageHeight],
+    compress: true,
+  });
+
+  const { positions } = calculatePhotoGrid(sheetSettings);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.96);
+
+  positions.forEach((pos) => {
+    pdf.addImage(dataUrl, 'JPEG', pos.x, pos.y, pos.width, pos.height);
+
+    if (sheetSettings.showBorder) {
+      pdf.setDrawColor(sheetSettings.borderColor || '#64748b');
+      pdf.setLineWidth(sheetSettings.borderWidthPt ? sheetSettings.borderWidthPt * 0.352778 : 0.2);
+      pdf.rect(pos.x, pos.y, pos.width, pos.height);
+    }
+
+    if (sheetSettings.showCropMarks) {
+      pdf.setDrawColor(0, 0, 0);
+      pdf.setLineWidth(0.2);
+      const markLen = 3;
+      pdf.line(pos.x - markLen, pos.y, pos.x, pos.y);
+      pdf.line(pos.x, pos.y - markLen, pos.x, pos.y);
+      pdf.line(pos.x + pos.width, pos.y, pos.x + pos.width + markLen, pos.y);
+      pdf.line(pos.x + pos.width, pos.y - markLen, pos.x + pos.width, pos.y);
+      pdf.line(pos.x - markLen, pos.y + pos.height, pos.x, pos.y + pos.height);
+      pdf.line(pos.x, pos.y + pos.height, pos.x, pos.y + pos.height + markLen);
+      pdf.line(pos.x + pos.width, pos.y + pos.height, pos.x + pos.width + markLen, pos.y + pos.height);
+      pdf.line(pos.x + pos.width, pos.y + pos.height, pos.x + pos.width, pos.y + pos.height + markLen);
+    }
+  });
+
+  pdf.save(`fototessere_${sheetSettings.paperFormat.toLowerCase()}_${Date.now()}.pdf`);
+}
+
+export function printPdf(canvas: HTMLCanvasElement, sheetSettings: SheetSettings): void {
+  downloadPdf(canvas, sheetSettings);
+  window.print();
+}
+

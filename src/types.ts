@@ -92,3 +92,51 @@ export interface PrintPreset {
   isDefault?: boolean;
   config: LayoutConfig;
 }
+
+export type PaperFormat = 'A5' | 'A6';
+export type SheetOrientation = 'portrait' | 'landscape';
+
+export interface SheetSettings {
+  paperFormat: PaperFormat;
+  paperWidthMm: number;
+  paperHeightMm: number;
+  orientation: SheetOrientation;
+  spacingMm: number;
+  showBorder: boolean;
+  borderWidthPt: number;
+  borderColor: string;
+  showCropMarks: boolean;
+  layout: '2x2' | 'row' | 'column';
+}
+
+export interface CropTransform {
+  scale: number;
+  rotation: number;
+  x: number;
+  y: number;
+  flipHorizontal?: boolean;
+}
+
+export interface ImageAdjustments {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  grayscale: boolean;
+}
+
+export interface BiometricGuideSettings {
+  showGuides: boolean;
+  showFaceOval?: boolean;
+  showEyeLine?: boolean;
+  showCenterLine?: boolean;
+  showThirdsGrid?: boolean;
+}
+
+export interface PhotoPosition {
+  index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
