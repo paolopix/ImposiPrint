@@ -1,377 +1,236 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useMemo, useEffect } from 'react';
 import {
-  CropTransform,
-  ImageAdjustments,
-  BiometricGuideSettings,
-  SheetSettings,
-} from './types';
-import {
-  calculateFitScale,
-  renderCroppedPhotoCanvas,
-  loadImageFromUrl,
-} from './utils/imageUtils';
-import { createSamplePortraitDataUrl } from './utils/sampleImage';
-import { CropCanvas } from './components/CropCanvas';
-import { ControlsPanel } from './components/ControlsPanel';
-import { A5Preview } from './components/A5Preview';
-import { ImageUploader } from './components/ImageUploader';
-import { CameraCaptureModal } from './components/CameraCaptureModal';
-import { PassportRequirementsModal } from './components/PassportRequirementsModal';
-import {
-  Printer,
-  Sparkles,
-  HelpCircle,
-  FileCheck2,
-  SlidersHorizontal,
-  Eye,
-} from 'lucide-react';
+  DEFAULT_LAYOUT_CONFIG,
+  FACTORY_PRESETS,
+  INITIAL_SAMPLE_IMAGES,
+} from './constants';
+import { FitMode, LayoutConfig, PrintPreset, UploadedImage } from './types';
+import { computeLayout } from './utils/layoutCalculator';
+import { exportLayoutToPdf } from './utils/pdfGenerator';
+import { triggerDirectPrint } from './utils/printHelper';
+import { Header } from './components/Header';
+import { SidebarControls } from './components/SidebarControls';
+import { SheetPreview } from './components/SheetPreview';
+import { ImageManager } from './components/ImageManager';
+import { PresetModal } from './components/PresetModal';
+import { PrintDocument } from './components/PrintDocument';
+
+const STORAGE_PRESETS_KEY = 'imposiprint_saved_presets_v1';
 
 export default function App() {
-  const [image, setImage] = useState<HTMLImageElement | null>(null);
-  const [currentFilename, setCurrentFilename] = useState<string>('foto-esempio-passaporto.jpg');
+  const [config, setConfig] = useState<LayoutConfig>(DEFAULT_LAYOUT_CONFIG);
+  const [images, setImages] = useState<UploadedImage[]>(INITIAL_SAMPLE_IMAGES);
+  const [repeatMode, setRepeatMode] = useState<boolean>(false);
 
-  // Transformation states (x, y, scale, rotation, flip)
-  const [transform, setTransform] = useState<CropTransform>({
-    x: 0,
-    y: 0,
-    scale: 1,
-    rotation: 0,
-    flipHorizontal: false,
-  });
+  // View state
+  const [activeView, setActiveView] = useState<'editor' | 'images'>('editor');
 
-  // Photo color adjustments
-  const [adjustments, setAdjustments] = useState<ImageAdjustments>({
-    brightness: 100,
-    contrast: 100,
-    saturation: 100,
-    grayscale: false,
-  });
+  // Preview overlay visual toggles
+  const [showRulers, setShowRulers] = useState<boolean>(true);
+  const [showMarginGuides, setShowMarginGuides] = useState<boolean>(true);
+  const [showDimensionsBadge, setShowDimensionsBadge] = useState<boolean>(false);
 
-  // Biometric guidelines
-  const [guides, setGuides] = useState<BiometricGuideSettings>({
-    showGuides: true,
-    showFaceOval: true,
-    showEyeLine: true,
-    showCenterLine: true,
-    showThirdsGrid: false,
-  });
-
-  // Sheet configuration: 35x45mm, 4 copies, 1cm spacing on A5 or A6, portrait/landscape, light border
-  const [sheetSettings, setSheetSettings] = useState<SheetSettings>({
-    paperFormat: 'A5',
-    paperWidthMm: 148,
-    paperHeightMm: 210,
-    photoWidthMm: 35,
-    photoHeightMm: 45,
-    spacingMm: 10, // 1 cm as explicitly requested
-    count: 4,
-    layout: '2x2',
-    borderWidthPt: 0.5,
-    borderColor: '#9ca3af',
-    showBorder: true,
-    showCropMarks: true,
-    cropMarkLengthMm: 2.5,
-    orientation: 'portrait',
-  });
-
-  // Modals state
-  const [isWebcamOpen, setIsWebcamOpen] = useState(false);
-  const [isRequirementsOpen, setIsRequirementsOpen] = useState(false);
-  const [activeMobileView, setActiveMobileView] = useState<'editor' | 'sheet'>('editor');
-
-  // High resolution cropped canvas
-  const [croppedCanvas, setCroppedCanvas] = useState<HTMLCanvasElement | null>(null);
-
-  // Initialize with sample portrait
-  useEffect(() => {
-    const sampleDataUrl = createSamplePortraitDataUrl();
-    if (sampleDataUrl) {
-      loadImageFromUrl(sampleDataUrl)
-        .then((img) => {
-          setImage(img);
-          const baseScale = calculateFitScale(img.naturalWidth, img.naturalHeight);
-          setTransform({
-            x: 0,
-            y: 0,
-            scale: parseFloat(baseScale.toFixed(2)),
-            rotation: 0,
-            flipHorizontal: false,
-          });
-        })
-        .catch(console.error);
+  // Preset management
+  const [presets, setPresets] = useState<PrintPreset[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_PRESETS_KEY);
+      if (saved) {
+        const parsed: PrintPreset[] = JSON.parse(saved);
+        // Combine factory presets with user custom presets
+        const userPresets = parsed.filter((p) => !p.isDefault);
+        return [...FACTORY_PRESETS, ...userPresets];
+      }
+    } catch (e) {
+      console.warn('Errore nel caricamento dei preset salvati:', e);
     }
-  }, []);
+    return FACTORY_PRESETS;
+  });
 
-  // Update high-res canvas whenever image, transform, or adjustments change
-  useEffect(() => {
-    if (!image) {
-      setCroppedCanvas(null);
-      return;
-    }
-    const canvas = renderCroppedPhotoCanvas(image, transform, adjustments);
-    setCroppedCanvas(canvas);
-  }, [image, transform, adjustments]);
+  const [isPresetModalOpen, setIsPresetModalOpen] = useState<boolean>(false);
+  const [presetModalMode, setPresetModalMode] = useState<'list' | 'save'>('list');
 
-  // Center image action
-  const handleCenter = useCallback(() => {
-    setTransform((prev) => ({
-      ...prev,
-      x: 0,
-      y: 0,
-    }));
-  }, []);
+  // PDF Export state
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportProgress, setExportProgress] = useState<number>(0);
+  const [exportStatus, setExportStatus] = useState<string>('');
 
-  // Fit image to frame action
-  const handleFit = useCallback(() => {
-    if (!image) return;
-    const baseScale = calculateFitScale(image.naturalWidth, image.naturalHeight);
-    setTransform((prev) => ({
-      ...prev,
-      x: 0,
-      y: 0,
-      scale: parseFloat(baseScale.toFixed(2)),
-    }));
-  }, [image]);
+  // Notification toast
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Reset all transformations action
-  const handleReset = useCallback(() => {
-    if (!image) return;
-    const baseScale = calculateFitScale(image.naturalWidth, image.naturalHeight);
-    setTransform({
-      x: 0,
-      y: 0,
-      scale: parseFloat(baseScale.toFixed(2)),
-      rotation: 0,
-      flipHorizontal: false,
-    });
-    setAdjustments({
-      brightness: 100,
-      contrast: 100,
-      saturation: 100,
-      grayscale: false,
-    });
-  }, [image]);
-
-  // Handle uploaded image
-  const handleImageLoaded = (img: HTMLImageElement, filename: string) => {
-    setImage(img);
-    setCurrentFilename(filename);
-    const baseScale = calculateFitScale(img.naturalWidth, img.naturalHeight);
-    setTransform({
-      x: 0,
-      y: 0,
-      scale: parseFloat(baseScale.toFixed(2)),
-      rotation: 0,
-      flipHorizontal: false,
-    });
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((curr) => (curr === msg ? null : curr));
+    }, 3000);
   };
 
-  // Re-use sample image
-  const handleUseSampleImage = () => {
-    const sampleDataUrl = createSamplePortraitDataUrl();
-    loadImageFromUrl(sampleDataUrl).then((img) => {
-      handleImageLoaded(img, 'foto-esempio-passaporto.jpg');
-    });
+  // Save custom presets to localStorage whenever updated
+  const saveCustomPresets = (updatedPresets: PrintPreset[]) => {
+    try {
+      const userPresets = updatedPresets.filter((p) => !p.isDefault);
+      localStorage.setItem(STORAGE_PRESETS_KEY, JSON.stringify(userPresets));
+    } catch (e) {
+      console.warn('Errore nel salvataggio in localStorage:', e);
+    }
   };
 
-  const imageDimensions = useMemo(() => {
-    if (!image) return undefined;
-    return { width: image.naturalWidth, height: image.naturalHeight };
-  }, [image]);
+  // Computed layout calculations (columns, rows, positions, pagination)
+  const computedLayout = useMemo(() => {
+    return computeLayout(config, images, repeatMode);
+  }, [config, images, repeatMode]);
+
+  // Handlers
+  const handleDirectPrint = () => {
+    triggerDirectPrint();
+  };
+
+  const handleExportPdf = async () => {
+    if (isExporting) return;
+    try {
+      setIsExporting(true);
+      await exportLayoutToPdf(computedLayout, config, {
+        fileName: `imposiprint_${config.paperSize.toLowerCase()}_${config.imageWidthCm}x${config.imageHeightCm}cm.pdf`,
+        onProgress: (prog, status) => {
+          setExportProgress(prog);
+          setExportStatus(status);
+        },
+      });
+      showToast('File PDF generato e scaricato con successo!');
+    } catch (err) {
+      console.error('Errore durante esportazione PDF:', err);
+      showToast('Si è verificato un errore durante la creazione del PDF.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleSaveCurrentPreset = (name: string, description: string) => {
+    const newPreset: PrintPreset = {
+      id: `custom-preset-${Date.now()}`,
+      name,
+      description: description || `Preset ${config.paperSize} (${config.imageWidthCm}x${config.imageHeightCm} cm)`,
+      isDefault: false,
+      config: JSON.parse(JSON.stringify(config)),
+    };
+
+    const nextList = [...presets, newPreset];
+    setPresets(nextList);
+    saveCustomPresets(nextList);
+    showToast(`Preset "${name}" salvato con successo!`);
+  };
+
+  const handleApplyPreset = (preset: PrintPreset) => {
+    setConfig(JSON.parse(JSON.stringify(preset.config)));
+    showToast(`Preset "${preset.name}" applicato!`);
+  };
+
+  const handleDeletePreset = (id: string) => {
+    const nextList = presets.filter((p) => p.id !== id);
+    setPresets(nextList);
+    saveCustomPresets(nextList);
+    showToast('Preset eliminato.');
+  };
+
+  const handleUpdateImageFitMode = (imageId: string, fitMode: FitMode) => {
+    setImages((prev) =>
+      prev.map((img) => (img.id === imageId ? { ...img, fitMode } : img))
+    );
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
-      {/* Top Header */}
-      <header className="sticky top-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center shadow-md shadow-indigo-500/20">
-              <Printer className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-base sm:text-lg font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-                <span>FotoTessera Studio</span>
-                <span className="text-[11px] font-mono font-medium bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">
-                  35 × 45 mm
-                </span>
-                <span className="text-[11px] font-mono font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded-full border border-slate-200 dark:border-slate-700 hidden sm:inline-block">
-                  {sheetSettings.paperFormat} ({sheetSettings.orientation === 'landscape' ? 'Orizzontale' : 'Verticale'})
-                </span>
-              </h1>
-              <p className="text-xs text-slate-500 hidden sm:block">
-                Scala, ruota, centra e stampa 4 copie su foglio A5 o A6 (verticale/orizzontale) con 1 cm di distanziamento
-              </p>
-            </div>
-          </div>
-
-          {/* Quick links & Requirements button */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsRequirementsOpen(true)}
-              className="py-1.5 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <HelpCircle className="w-3.5 h-3.5 text-indigo-500" />
-              <span className="hidden md:inline">Requisiti Passaporto / CIE</span>
-              <span className="md:hidden">Regole</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-5">
-        {/* Step 1: Image Uploader / Dropzone */}
-        <section>
-          <ImageUploader
-            onImageLoaded={handleImageLoaded}
-            onUseSampleImage={handleUseSampleImage}
-            onOpenWebcam={() => setIsWebcamOpen(true)}
-            currentFilename={currentFilename}
-            imageDimensions={imageDimensions}
-          />
-        </section>
-
-        {/* Mobile View Switcher (Editor vs Sheet) */}
-        <div className="flex lg:hidden bg-slate-200 dark:bg-slate-800 p-1 rounded-xl">
-          <button
-            type="button"
-            onClick={() => setActiveMobileView('editor')}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-              activeMobileView === 'editor'
-                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                : 'text-slate-600 dark:text-slate-400'
-            }`}
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span>Editor 35×45 mm</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveMobileView('sheet')}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-              activeMobileView === 'sheet'
-                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                : 'text-slate-600 dark:text-slate-400'
-            }`}
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span>Anteprima Foglio {sheetSettings.paperFormat}</span>
-          </button>
-        </div>
-
-        {/* Studio Grid Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-          {/* Left Column: Interactive Canvas & Controls */}
-          <div
-            className={`lg:col-span-7 flex flex-col gap-5 ${
-              activeMobileView === 'sheet' ? 'hidden lg:flex' : 'flex'
-            }`}
-          >
-            {/* Interactive 35x45 Crop Canvas with floating toolbar */}
-            <CropCanvas
-              image={image}
-              transform={transform}
-              onTransformChange={setTransform}
-              adjustments={adjustments}
-              guides={guides}
-              onReset={handleReset}
-              onFit={handleFit}
-              onCenter={handleCenter}
-            />
-
-            {/* Controls Panel (Position & Transform, Photo Adjustments, Biometric Guides, Sheet Settings) */}
-            <ControlsPanel
-              transform={transform}
-              onTransformChange={setTransform}
-              adjustments={adjustments}
-              onAdjustmentsChange={setAdjustments}
-              guides={guides}
-              onGuidesChange={setGuides}
-              sheetSettings={sheetSettings}
-              onSheetSettingsChange={setSheetSettings}
-              onCenter={handleCenter}
-              onFit={handleFit}
-              onReset={handleReset}
-            />
-          </div>
-
-          {/* Right Column: Realistic Sheet Preview with 4 Copies */}
-          <div
-            className={`lg:col-span-5 flex flex-col ${
-              activeMobileView === 'editor' ? 'hidden lg:flex' : 'flex'
-            }`}
-          >
-            <A5Preview
-              croppedCanvas={croppedCanvas}
-              sheetSettings={sheetSettings}
-              onSheetSettingsChange={setSheetSettings}
-            />
-          </div>
-        </div>
-
-        {/* Feature & Technical Details Footer Banner */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-          <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-start gap-3 shadow-xs">
-            <div className="p-2 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-xl flex-shrink-0">
-              <FileCheck2 className="w-4 h-4" />
-            </div>
-            <div>
-              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-0.5">
-                Formato Conforme 35×45 mm
-              </h4>
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                Rapporto 7:9 proporzionato per i documenti italiani ed europei (Passaporto, Carta d'Identità, Patente).
-              </p>
-            </div>
-          </div>
-
-          <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-start gap-3 shadow-xs">
-            <div className="p-2 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 rounded-xl flex-shrink-0">
-              <Printer className="w-4 h-4" />
-            </div>
-            <div>
-              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-0.5">
-                Stampa {sheetSettings.paperFormat} con 4 Copie e Spaziatura 1 cm
-              </h4>
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                Disposizione geometrica calibrata su foglio {sheetSettings.paperFormat} ({sheetSettings.orientation === 'landscape' ? 'orizzontale' : 'verticale'}) con esattamente 10 mm di intervallo e sottile bordo per il taglio.
-              </p>
-            </div>
-          </div>
-
-          <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-start gap-3 shadow-xs">
-            <div className="p-2 bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-xl flex-shrink-0">
-              <Sparkles className="w-4 h-4" />
-            </div>
-            <div>
-              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-0.5">
-                Guide Biometriche ICAO & Centratura
-              </h4>
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                Sagoma ovale viso (70-80% altezza), asse di simmetria, controlli di centratura rapida e regolazione colore.
-              </p>
-            </div>
-          </div>
-        </div>
-      </main>
-
-      {/* Footer */}
-      <footer className="mt-8 border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-400">
-        FotoTessera Studio • Standard 35×45 mm • Foglio {sheetSettings.paperFormat} ({sheetSettings.orientation === 'landscape' ? 'Orizzontale' : 'Verticale'}) • 4 Copie distanziate 1 cm
-      </footer>
-
-      {/* Modals */}
-      <CameraCaptureModal
-        isOpen={isWebcamOpen}
-        onClose={() => setIsWebcamOpen(false)}
-        onCapture={(img) => handleImageLoaded(img, 'foto-scatto-webcam.jpg')}
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-indigo-500/30 selection:text-white">
+      {/* Top Application Bar */}
+      <Header
+        onDirectPrint={handleDirectPrint}
+        onExportPdf={handleExportPdf}
+        isExporting={isExporting}
+        exportProgress={exportProgress}
+        exportStatus={exportStatus}
+        onOpenPresets={() => {
+          setPresetModalMode('list');
+          setIsPresetModalOpen(true);
+        }}
+        activeView={activeView}
+        setActiveView={setActiveView}
       />
 
-      <PassportRequirementsModal
-        isOpen={isRequirementsOpen}
-        onClose={() => setIsRequirementsOpen(false)}
+      {/* Main Workspace Body */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {activeView === 'editor' ? (
+          <>
+            {/* Left Parameters & Settings Panel */}
+            <SidebarControls
+              config={config}
+              onChangeConfig={setConfig}
+              layout={computedLayout}
+              onOpenSavePresetModal={() => {
+                setPresetModalMode('save');
+                setIsPresetModalOpen(true);
+              }}
+              showRulers={showRulers}
+              setShowRulers={setShowRulers}
+              showMarginGuides={showMarginGuides}
+              setShowMarginGuides={setShowMarginGuides}
+              showDimensionsBadge={showDimensionsBadge}
+              setShowDimensionsBadge={setShowDimensionsBadge}
+            />
+
+            {/* Interactive Real-Time Sheet Preview Area */}
+            <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+              <SheetPreview
+                layout={computedLayout}
+                config={config}
+                showRulers={showRulers}
+                showMarginGuides={showMarginGuides}
+                showDimensionsBadge={showDimensionsBadge}
+                images={images}
+                onUpdateImageFitMode={handleUpdateImageFitMode}
+              />
+            </main>
+          </>
+        ) : (
+          /* Images & Copies Management View */
+          <main className="flex-1 overflow-y-auto bg-neutral-950">
+            <ImageManager
+              images={images}
+              setImages={setImages}
+              slotsPerPage={computedLayout.slotsPerPage}
+              repeatMode={repeatMode}
+              setRepeatMode={setRepeatMode}
+              globalFitMode={config.fitMode}
+              onUpdateImageFitMode={handleUpdateImageFitMode}
+            />
+          </main>
+        )}
+      </div>
+
+      {/* Preset Modal */}
+      <PresetModal
+        isOpen={isPresetModalOpen}
+        onClose={() => setIsPresetModalOpen(false)}
+        currentConfig={config}
+        presets={presets}
+        onApplyPreset={handleApplyPreset}
+        onSavePreset={handleSaveCurrentPreset}
+        onDeletePreset={handleDeletePreset}
+        defaultMode={presetModalMode}
       />
+
+      {/* Dedicated Print Only Element for native direct browser print */}
+      <PrintDocument layout={computedLayout} config={config} />
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="no-print fixed bottom-6 right-6 z-50 bg-neutral-900 border border-neutral-700 text-neutral-100 text-xs px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-400" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 }

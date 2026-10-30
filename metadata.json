@@ -1,6 +1,6 @@
 {
-  "name": "FotoTessera A5 - Stampa 35x45mm",
-  "description": "Ritaglia, scala, ruota e centra fototessere nel formato 35x45mm con esportazione PDF A5 a 4 copie distanziate di 1 cm con riquadro di taglio.",
+  "name": "ImposiPrint - Impaginazione e Stampa Ottimizzata",
+  "description": "Ottimizza e disponi immagini su fogli A6, A5, A4 e A3 con misure in cm, segni di taglio, anteprima interattiva, esportazione PDF e stampa diretta.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

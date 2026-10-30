@@ -1,42 +1,94 @@
-export interface CropTransform {
-  x: number; // offset in px relative to center
-  y: number; // offset in px relative to center
-  scale: number; // scale multiplier
-  rotation: number; // angle in degrees (-180 to 180)
-  flipHorizontal: boolean;
+export type PaperSize = 'A6' | 'A5' | 'A4' | 'A3' | 'custom';
+
+export type Orientation = 'portrait' | 'landscape' | 'auto';
+
+export type FitMode = 'cover' | 'contain' | 'fill';
+
+export type CropMarkStyle = 'corners' | 'crosses' | 'perimeter' | 'grid' | 'none';
+
+export interface PaperDimensions {
+  widthMm: number;
+  heightMm: number;
 }
 
-export interface ImageAdjustments {
-  brightness: number; // 50 to 150 %
-  contrast: number; // 50 to 150 %
-  saturation: number; // 0 to 150 %
-  grayscale: boolean;
+export interface Margins {
+  top: number; // in mm
+  bottom: number;
+  left: number;
+  right: number;
 }
 
-export type PaperFormat = 'A5' | 'A6';
-export type SheetOrientation = 'portrait' | 'landscape';
-
-export interface SheetSettings {
-  paperFormat: PaperFormat; // 'A5' (148x210 mm) | 'A6' (105x148 mm)
-  paperWidthMm: number; // 148 mm for A5, 105 mm for A6 (verticale)
-  paperHeightMm: number; // 210 mm for A5, 148 mm for A6 (verticale)
-  photoWidthMm: number; // 35 mm
-  photoHeightMm: number; // 45 mm
-  spacingMm: number; // 10 mm (1 cm)
-  count: number; // 4
-  layout: '2x2' | 'row' | 'column';
-  borderWidthPt: number; // 0.25 pt (sottile) to 1 pt
-  borderColor: string; // e.g. '#9ca3af'
-  showBorder: boolean;
-  showCropMarks: boolean;
-  cropMarkLengthMm: number;
-  orientation: SheetOrientation; // 'portrait' (verticale) | 'landscape' (orizzontale)
+export interface CropMarkConfig {
+  enabled: boolean;
+  style: CropMarkStyle;
+  lengthMm: number;
+  offsetMm: number; // distance from image edge
+  lineWidthMm: number;
+  color: string;
 }
 
-export interface BiometricGuideSettings {
-  showGuides: boolean;
-  showFaceOval: boolean;
-  showEyeLine: boolean;
-  showCenterLine: boolean;
-  showThirdsGrid: boolean;
+export interface LayoutConfig {
+  paperSize: PaperSize;
+  customPaperWidthMm: number;
+  customPaperHeightMm: number;
+  orientation: Orientation;
+  imageWidthCm: number;
+  imageHeightCm: number;
+  lockAspectRatio: boolean;
+  gapXMm: number;
+  gapYMm: number;
+  linkGaps: boolean;
+  fitMode: FitMode;
+  margins: Margins;
+  linkMargins: boolean;
+  autoCenter: boolean;
+  cropMarks: CropMarkConfig;
+}
+
+export interface UploadedImage {
+  id: string;
+  url: string;
+  name: string;
+  width: number;
+  height: number;
+  aspectRatio: number;
+  copies: number;
+  fitMode?: FitMode;
+}
+
+export interface GridSlot {
+  pageIndex: number;
+  row: number;
+  col: number;
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  heightMm: number;
+  image?: UploadedImage;
+  slotIndex: number;
+}
+
+export interface ComputedLayout {
+  sheetWidthMm: number;
+  sheetHeightMm: number;
+  cols: number;
+  rows: number;
+  slotsPerPage: number;
+  totalSlots: number;
+  totalPages: number;
+  effectiveOrientation: 'portrait' | 'landscape';
+  gridWidthMm: number;
+  gridHeightMm: number;
+  effectiveLeftMm: number;
+  effectiveTopMm: number;
+  pages: GridSlot[][];
+  efficiencyPercent: number; // percentage of paper covered by images
+}
+
+export interface PrintPreset {
+  id: string;
+  name: string;
+  description: string;
+  isDefault?: boolean;
+  config: LayoutConfig;
 }
